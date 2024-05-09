@@ -1,0 +1,17 @@
+[build-system]
+requires = [ "poetry-core",]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "tkan" 
+version = "0.1.0" 
+description = "Temporal KAN model"
+authors = [ "Rémi Genet", "Hugo Inzirillo"]  
+readme = "README.md"  
+packages = [{include = "tkan"}]  
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0" 
+numpy = ">=1.2,<2"
+pyarrow = ">=15.0.0"
+tensorflow = ">=2.8,<3" 
