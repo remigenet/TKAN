@@ -109,7 +109,7 @@ class TKAN(Layer):
             layer.build((batch_size, num_features))
         super(TKAN, self).build(input_shape)
 
-    def call(self, inputs: tf.Tensor, training: Optional[bool] = None) -> tf.Tensor:
+    def call(self, inputs: tf.Tensor, training: Optional[bool] = None, **kwargs) -> tf.Tensor:
         """
         Logic for the layer's forward pass. Handles the computation of LSTM gate activations,
         sub-layer processing, and the sequential accumulation of outputs.
