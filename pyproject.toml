@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "tkan" 
-version = "0.1.0" 
+version = "0.1.1" 
 description = "Temporal KAN model"
 authors = [ "Rémi Genet", "Hugo Inzirillo"]  
 readme = "README.md"  
