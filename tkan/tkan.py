@@ -28,6 +28,7 @@ class TKAN(Layer):
                  num_outputs: int, 
                  return_sequences: bool = False, 
                  trainable_power_spline: bool = False, 
+                 return_state=False,
                  **kwargs) -> None:
         """
         Initializes a TKAN layer with specified activations, number of output units, and other configurations.
@@ -48,6 +49,7 @@ class TKAN(Layer):
         self.activation_funcs = activation_funcs
         self.num_outputs = num_outputs
         self.return_sequences = return_sequences
+        self.return_state = return_state
         self.aggregation_transform = tf.keras.layers.Dense(num_outputs, activation="sigmoid")
         # Sub-layer LSTM components
         self.global_biases = {}
@@ -155,8 +157,10 @@ class TKAN(Layer):
             
             if self.return_sequences:
                 outputs.append(global_hidden_state)
-
-        return tf.stack(outputs, axis=1) if self.return_sequences else global_hidden_state
+        out = tf.stack(outputs, axis=1) if self.return_sequences else global_hidden_state
+        if self.return_state:
+            return out, global_hidden_state, global_cell_state
+        return out
 
 
     def compute_output_shape(self, input_shape: Tuple[int, int, int]) -> Union[Tuple[int, int, int], Tuple[int, int]]:
@@ -175,9 +179,15 @@ class TKAN(Layer):
             of outputs. If False, the output shape will be (batch_size, num_outputs), reflecting the final
             output state only.
         """
+        batch_size = input_shape[0]
+        length = input_shape[1]
+
         if self.return_sequences:
-            return (input_shape[0], input_shape[1], self.num_outputs)
+            output_shape = (batch_size, length, self.num_outputs)
         else:
-            return (input_shape[0], self.num_outputs)
+            output_shape = (batch_size, self.num_outputs)
+        if self.return_state:
+            return output_shape, (batch_size, self.num_outputs), (batch_size, self.num_outputs)
+        return output_shape
 
 
