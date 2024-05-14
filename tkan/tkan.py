@@ -1,10 +1,9 @@
+import tensorflow as tf
 from tensorflow.keras import activations
-from tensorflow.keras import backend
+from tensorflow.keras import backend as K
 from tensorflow.keras import constraints
 from tensorflow.keras import initializers
-from tensorflow.keras import ops
 from tensorflow.keras import regularizers
-from tensorflow.keras import tree
 from tensorflow.keras.layers import InputSpec, Layer, RNN
 from tkan import BSplineActivation, PowerSplineActivation, FixedSplineActivation
 
@@ -31,9 +30,9 @@ class DropoutRNNCell:
         if not hasattr(self, "_dropout_mask"):
             self._dropout_mask = None
         if self._dropout_mask is None and self.dropout > 0:
-            ones = ops.ones_like(step_input)
-            self._dropout_mask = backend.random.dropout(
-                ones, rate=self.dropout, seed=self.seed_generator
+            ones = tf.ones_like(step_input)
+            self._dropout_mask = K.dropout(
+                ones, level=self.dropout, seed=self.seed_generator
             )
         return self._dropout_mask
 
@@ -41,9 +40,9 @@ class DropoutRNNCell:
         if not hasattr(self, "_recurrent_dropout_mask"):
             self._recurrent_dropout_mask = None
         if self._recurrent_dropout_mask is None and self.recurrent_dropout > 0:
-            ones = ops.ones_like(step_input)
-            self._recurrent_dropout_mask = backend.random.dropout(
-                ones, rate=self.recurrent_dropout, seed=self.seed_generator
+            ones = tf.ones_like(step_input)
+            self._recurrent_dropout_mask = K.dropout(
+                ones, level=self.recurrent_dropout, seed=self.seed_generator
             )
         return self._recurrent_dropout_mask
 
@@ -60,7 +59,8 @@ class DropoutRNNCell:
     def reset_recurrent_dropout_mask(self):
         self._recurrent_dropout_mask = None
 
-@tf.keras.utils.register_keras_serializable(package="tkan", name = "TKANCell")
+
+@tf.keras.utils.register_keras_serializable(package="tkan", name="TKANCell")
 class TKANCell(Layer, DropoutRNNCell):
     """Cell class for the TKAN layer.
     Modification of the LSTM implementation in tensorflow in order to provide fully seamless integration within the framework
@@ -133,7 +133,6 @@ class TKANCell(Layer, DropoutRNNCell):
     >>> final_state.shape
     (32, 4)
     """
-
     def __init__(
         self,
         units,
@@ -161,7 +160,7 @@ class TKANCell(Layer, DropoutRNNCell):
                 "Received an invalid value for argument `units`, "
                 f"expected a positive integer, got {units}."
             )
-        implementation = kwargs.pop("implementation", 2)
+        tkan_activations = tkan_activations or [BSplineActivation(3)]
         super().__init__(**kwargs)
         self.units = units
         self.activation = activations.get(activation)
@@ -185,15 +184,23 @@ class TKANCell(Layer, DropoutRNNCell):
         self.dropout = min(1.0, max(0.0, dropout))
         self.recurrent_dropout = min(1.0, max(0.0, recurrent_dropout))
         self.seed = seed
-        self.seed_generator = tf.keras.random.SeedGenerator(seed=seed)
+
+
+        if seed is not None:
+            self.seed_generator = tf.random.experimental.Generator.from_seed(seed=seed)
+        else:
+            try:
+                self.seed_generator = tf.random.experimental.Generator.from_non_deterministic_state()
+            except RuntimeError:
+                # Fallback to a deterministic generator with a fixed seed
+                self.seed_generator = tf.random.experimental.Generator.from_seed(seed=0)
 
         self.unit_forget_bias = unit_forget_bias
         self.state_size = [self.units, self.units] + [1 for _ in tkan_activations]
         self.output_size = self.units
-        self.implementation = implementation
 
         self.tkan_sub_layers = []
-        tkan_activations = tkan_activations or [BSplineActivation(3)]
+        
         for act in tkan_activations:
             if act is None:
                 self.tkan_sub_layers.append(tf.keras.layers.Dense(1, activation=BSplineActivation()))
@@ -201,6 +208,7 @@ class TKANCell(Layer, DropoutRNNCell):
                 self.tkan_sub_layers.append(tf.keras.layers.Dense(1, activation=FixedSplineActivation(exponent=act)))
             else:
                 self.tkan_sub_layers.append(tf.keras.layers.Dense(1, activation=act))
+
 
     def build(self, input_shape):
         super().build(input_shape)
@@ -246,12 +254,13 @@ class TKANCell(Layer, DropoutRNNCell):
         if self.use_bias:
             if self.unit_forget_bias:
                 def bias_initializer(_, *args, **kwargs):
-                    return ops.concatenate(
+                    return tf.concat(
                         [
                             self.bias_initializer((self.units,), *args, **kwargs),
                             initializers.get("ones")((self.units,), *args, **kwargs),
                             self.bias_initializer((self.units,), *args, **kwargs),
-                        ]
+                        ],
+                        axis=0
                     )
             else:
                 bias_initializer = self.bias_initializer
@@ -290,16 +299,16 @@ class TKANCell(Layer, DropoutRNNCell):
 
         # Split the kernel and compute input projections for gates
         if self.use_bias:
-          x_i, x_f, x_c = ops.split(self.recurrent_activation(ops.matmul(inputs, self.kernel) + ops.matmul(h_tm1, self.recurrent_kernel) + self.bias), 3, axis=1)
+          x_i, x_f, x_c = tf.split(self.recurrent_activation(tf.matmul(inputs, self.kernel) + tf.matmul(h_tm1, self.recurrent_kernel) + self.bias), 3, axis=1)
         else:
-          x_i, x_f, x_c = ops.split(self.recurrent_activation(ops.matmul(inputs, self.kernel) + ops.matmul(h_tm1, self.recurrent_kernel)), 3, axis=1)
+          x_i, x_f, x_c = tf.split(self.recurrent_activation(tf.matmul(inputs, self.kernel) + tf.matmul(h_tm1, self.recurrent_kernel)), 3, axis=1)
 
         # Process each sub-layer
         for idx, (sub_layer, sub_state) in enumerate(zip(self.tkan_sub_layers, sub_states)):
-            sub_kernel_h, sub_kernel_x = ops.split(self.sub_tkan_recurrent_kernel[idx, :], 2, axis=0)
+            sub_kernel_h, sub_kernel_x = tf.split(self.sub_tkan_recurrent_kernel[idx, :], 2, axis=0)
             agg_input = inputs * sub_kernel_x + sub_state * sub_kernel_h
             sub_output = sub_layer(agg_input)
-            sub_recurrent_kernel_h, sub_recurrent_kernel_x = ops.split(self.sub_tkan_kernel[idx, :], 2, axis=0)
+            sub_recurrent_kernel_h, sub_recurrent_kernel_x = tf.split(self.sub_tkan_kernel[idx, :], 2, axis=0)
             new_sub_state = sub_recurrent_kernel_h * sub_output + sub_state * sub_recurrent_kernel_x
 
             sub_outputs = sub_outputs.write(idx, sub_output)
@@ -310,7 +319,7 @@ class TKANCell(Layer, DropoutRNNCell):
 
         # Aggregate sub-layer outputs using weights and biases
         aggregated_sub_output = tf.reshape(sub_outputs, (batch_size, -1))
-        aggregated_input = ops.matmul(aggregated_sub_output, self.aggregated_weight) + self.aggregated_bias
+        aggregated_input = tf.matmul(aggregated_sub_output, self.aggregated_weight) + self.aggregated_bias
 
         xo = self.recurrent_activation(aggregated_input)
 
@@ -363,24 +372,16 @@ class TKANCell(Layer, DropoutRNNCell):
         base_config = super().get_config()
         return {**base_config, **config}
 
-    def get_initial_state(self, batch_size=None):
+    def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
         return [
-            ops.zeros((batch_size, self.units), dtype=self.compute_dtype),
-            ops.zeros((batch_size, self.units), dtype=self.compute_dtype)
-        ] + [ops.zeros((batch_size, 1), dtype=self.compute_dtype) for _ in self.tkan_sub_layers]
+            tf.zeros((batch_size, self.units), dtype=self.compute_dtype),
+            tf.zeros((batch_size, self.units), dtype=self.compute_dtype)
+        ] + [tf.zeros((batch_size, 1), dtype=self.compute_dtype) for _ in self.tkan_sub_layers]
 
 
-
-@tf.keras.utils.register_keras_serializable(package="tkan", name = "TKAN")
+@tf.keras.utils.register_keras_serializable(package="tkan", name="TKAN")
 class TKAN(RNN):
     """Temporal Kolmogorow-Arnold Network - Inzirillo & Genet 2024.
-
-    Based on available runtime hardware and constraints, this layer
-    will choose different implementations (cuDNN-based or backend-native)
-    to maximize the performance. If a GPU is available and all
-    the arguments to the layer meet the requirement of the cuDNN kernel
-    (see below for details), the layer will use a fast cuDNN implementation
-    when using the TensorFlow backend.
 
     For example:
 
@@ -542,11 +543,11 @@ class TKAN(RNN):
             activity_regularizer=activity_regularizer,
             **kwargs,
         )
-        self.input_spec = InputSpec(ndim=3)
+        self.input_spec = [InputSpec(ndim=3)]
         
 
     def inner_loop(self, sequences, initial_state, mask, training=False):
-        if tree.is_nested(mask):
+        if isinstance(mask, (list, tuple)):
             mask = mask[0]
         return super().inner_loop(
             sequences, initial_state, mask=mask, training=training
