@@ -14,7 +14,9 @@ Dependencies are managed using pyproject.toml.
 
 ## Usage
 
-TKAN can be used within TensorFlow models to handle complex sequential patterns in data. Here is an example that demonstrates how to use TKAN with B-spline activations in a sequential model:
+TKAN can be used within TensorFlow models to handle complex sequential patterns in data.
+It's implementation reproduce architecture of RNN in tensorflow with Cell class and Layer that inherits from RNN in order to provide a perfect integrations with tensorflow.
+Here is an example that demonstrates how to use TKAN with B-spline activations in a sequential model:
 
 ```python
 from temporal_kan import TKAN, BSplineActivation
@@ -22,11 +24,11 @@ import tensorflow as tf
 
 # Example model using TKAN with B-spline activations
 model = tf.keras.Sequential([
-    tf.keras.layers.InputLayer(input_shape=X_train.shape[1:]),
-    TKAN(activation_funcs=[BSplineActivation(i) for i in range(5)], num_outputs=100, return_sequences=True),
-    TKAN(activation_funcs=[BSplineActivation(i) for i in range(1, 4)], num_outputs=100, return_sequences=False),
-    tf.keras.layers.Dense(y_train.shape[1], activation='linear')
-], name=f'Sequential_Bspline')
+      tf.keras.layers.InputLayer(input_shape=X_train_seq.shape[1:]),
+      TKAN(100, tkan_activations=[BSplineActivation(3)], return_sequences=True, use_bias=True),
+      TKAN(100, tkan_activations=[BSplineActivation(3)], return_sequences=False, use_bias=True),
+      tf.keras.layers.Dense(y_train_seq.shape[1], activation=signed_softmax),
+])
 ```
 
 ### Activation Function Flexibility
