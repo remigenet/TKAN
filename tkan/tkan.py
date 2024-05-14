@@ -196,8 +196,8 @@ class TKANCell(Layer, DropoutRNNCell):
                 self.seed_generator = tf.random.experimental.Generator.from_seed(seed=0)
 
         self.unit_forget_bias = unit_forget_bias
-        self.state_size = [self.units, self.units] + [1 for _ in tkan_activations]
-        self.output_size = self.units
+        self.state_size = [units, units] + [1 for _ in tkan_activations]
+        self.output_size = units
 
         self.tkan_sub_layers = []
         
@@ -337,9 +337,7 @@ class TKANCell(Layer, DropoutRNNCell):
         config = {
             "units": self.units,
             "activation": activations.serialize(self.activation),
-            "tkan_sub_layers": activations.serialize(
-                self.tkan_sub_layers
-            ),
+            "tkan_sub_layers": self.tkan_sub_layers,
             "activation": activations.serialize(self.activation),
             "recurrent_activation": activations.serialize(
                 self.recurrent_activation
@@ -373,10 +371,13 @@ class TKANCell(Layer, DropoutRNNCell):
         return {**base_config, **config}
 
     def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
+        dtype = dtype or self.compute_dtype
         return [
-            tf.zeros((batch_size, self.units), dtype=self.compute_dtype),
-            tf.zeros((batch_size, self.units), dtype=self.compute_dtype)
-        ] + [tf.zeros((batch_size, 1), dtype=self.compute_dtype) for _ in self.tkan_sub_layers]
+            tf.zeros((batch_size, self.units), dtype=dtype),
+            tf.zeros((batch_size, self.units), dtype=dtype)
+        ] + [tf.zeros((batch_size, 1), dtype=dtype) for _ in range(len(self.tkan_sub_layers))]
+
+
 
 
 @tf.keras.utils.register_keras_serializable(package="tkan", name="TKAN")
@@ -625,6 +626,7 @@ class TKAN(RNN):
     def get_config(self):
         config = {
             "units": self.units,
+            "tkan_activations": [lay.activation for lay in self.cell.tkan_sub_layers],
             "activation": activations.serialize(self.activation),
             "recurrent_activation": activations.serialize(
                 self.recurrent_activation

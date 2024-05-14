@@ -61,6 +61,11 @@ class FixedSplineActivation(Layer):
             'max_exponent': self.max_exponent.numpy(),
         })
         return config
+        
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
 
 @tf.keras.utils.register_keras_serializable(package='tkan', name='PowerSplineActivation')
 class PowerSplineActivation(Layer):
@@ -149,6 +154,9 @@ class PowerSplineActivation(Layer):
         })
         return config
 
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
 
 @tf.keras.utils.register_keras_serializable(package='tkan', name='LinspaceInitializer')
 class LinspaceInitializer(tf.keras.initializers.Initializer):
@@ -195,6 +203,9 @@ class LinspaceInitializer(tf.keras.initializers.Initializer):
         """
         return {'start': self.start, 'stop': self.stop, 'num': self.num}
 
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
 
 @tf.keras.utils.register_keras_serializable(package='tkan', name='BSplineActivation')
 class BSplineActivation(Layer):
@@ -277,3 +288,7 @@ class BSplineActivation(Layer):
         config = super(BSplineActivation, self).get_config()
         config.update({"num_bases": self.num_bases, "order": self.order})
         return config
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
