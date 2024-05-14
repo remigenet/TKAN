@@ -1,6 +1,6 @@
 # TKAN: Temporal Kolmogorov-Arnold Networks
 
-TKAN (Temporal Kolmogorov-Arnold Networks) is a neural network architecture designed to enhance multi-horizon time series forecasting. This TensorFlow implementation integrates TKAN as a layer within sequential models, facilitating the use of advanced neural network techniques in practical applications. It is the original implementation of the [paper](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4824002)
+TKAN (Temporal Kolmogorov-Arnold Networks) is a neural network architecture designed to enhance multi-horizon time series forecasting. This TensorFlow implementation integrates TKAN as a layer within sequential models, facilitating the use of advanced neural network techniques in practical applications. It is the original implementation of the [paper](https://arxiv.org/abs/2405.07344)
 
 ## Installation
 
