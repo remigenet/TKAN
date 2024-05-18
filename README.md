@@ -29,9 +29,11 @@ model = tf.keras.Sequential([
       tf.keras.layers.InputLayer(input_shape=X_train_seq.shape[1:]),
       TKAN(100, tkan_activations=[BSplineActivation(3)], return_sequences=True, use_bias=True),
       TKAN(100, tkan_activations=[BSplineActivation(3)], return_sequences=False, use_bias=True),
-      tf.keras.layers.Dense(y_train_seq.shape[1], activation=signed_softmax),
+      tf.keras.layers.Dense(y_train_seq.shape[1]),
 ])
 ```
+
+You can find a more complete example with comparison with LSTM in the example folder.
 
 ### Activation Function Flexibility
 
