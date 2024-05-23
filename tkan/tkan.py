@@ -626,7 +626,7 @@ class TKAN(RNN):
     def get_config(self):
         config = {
             "units": self.units,
-            "tkan_activations": [lay.activation for lay in self.cell.tkan_sub_layers],
+            "tkan_activations": [activations.serialize(lay.activation) for lay in self.cell.tkan_sub_layers],
             "activation": activations.serialize(self.activation),
             "recurrent_activation": activations.serialize(
                 self.recurrent_activation
