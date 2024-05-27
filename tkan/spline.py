@@ -108,17 +108,18 @@ class PowerSplineActivation(Layer):
         Args:
             input_shape: The shape of the input to the layer, used to shape the weights.
         """
+        name = self.name
         self.exponent = self.add_weight(
             shape=(),
             initializer=tf.constant_initializer(self.initial_exponent),
             trainable=self.trainable,
-            name='exponent',
+            name=f'{name}_exponent',
         )
         self.bias = self.add_weight(
             shape=(),
             initializer='zeros',
             trainable=self.trainable,
-            name='bias',
+            name=f'{name}_bias',
         )
         super(PowerSplineActivation, self).build(input_shape)
 
@@ -223,7 +224,6 @@ class BSplineActivation(Layer):
         super(BSplineActivation, self).__init__(**kwargs)
         self.num_bases = num_bases
         self.order = order
-        self.w = self.add_weight(name='w', shape=(), initializer='glorot_uniform', trainable=True)
 
     def build(self, input_shape):
         """
@@ -232,14 +232,16 @@ class BSplineActivation(Layer):
         Args:
             input_shape: The shape of the input to the layer.
         """
+        name = self.name
+        self.w = self.add_weight(name=f'{name}_w', shape=(), initializer='glorot_uniform', trainable=True)
         self.coefficients = self.add_weight(
             shape=(self.num_bases,),
             initializer='zeros',
             trainable=True,
-            name='coefficients'
+            name=f'{name}_coefficients'
         )
         self.bases = self.add_weight(
-            name="bases",
+            name=f"{name}_bases",
             shape=(self.num_bases,),
             initializer=LinspaceInitializer(0.0, 1.0, self.num_bases),
             trainable=False

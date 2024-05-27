@@ -11,6 +11,6 @@ readme = "README.md"
 packages = [{include = "tkan"}]  
 
 [tool.poetry.dependencies]
-python = ">=3.10,<4.0" 
+python = ">=3.9,<4.0" 
 numpy = ">=1.2,<2"
 tensorflow = ">=2.8,<3" 

@@ -212,31 +212,32 @@ class TKANCell(Layer, DropoutRNNCell):
 
     def build(self, input_shape):
         super().build(input_shape)
+        name = self.name
         input_dim = input_shape[-1]
         self.kernel = self.add_weight(
             shape=(input_dim, self.units * 3),
-            name="kernel",
+            name=f"{name}_kernel",
             initializer=self.kernel_initializer,
             regularizer=self.kernel_regularizer,
             constraint=self.kernel_constraint,
         )
         self.recurrent_kernel = self.add_weight(
             shape=(self.units, self.units * 3),
-            name="recurrent_kernel",
+            name=f"{name}_recurrent_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
         )
         self.sub_tkan_kernel = self.add_weight(
             shape=(len(self.tkan_sub_layers), 2),
-            name="sub_tkan_kernel",
+            name=f"{name}_sub_tkan_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
         )
         self.sub_tkan_recurrent_kernel = self.add_weight(
             shape=(len(self.tkan_sub_layers), input_shape[1] * 2),
-            name="sub_tkan_recurrent_kernel",
+            name=f"{name}_sub_tkan_recurrent_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
@@ -244,12 +245,12 @@ class TKANCell(Layer, DropoutRNNCell):
         self.aggregated_weight = self.add_weight(
             shape=(len(self.tkan_sub_layers), self.units),
             initializer='glorot_uniform',
-            name='aggregated_weight'
+            name=f'{name}_aggregated_weight'
         )
         self.aggregated_bias = self.add_weight(
             shape=(self.units,),
             initializer='zeros',
-            name='aggregated_bias'
+            name=f'{name}_aggregated_bias'
         )
         if self.use_bias:
             if self.unit_forget_bias:
@@ -266,7 +267,7 @@ class TKANCell(Layer, DropoutRNNCell):
                 bias_initializer = self.bias_initializer
             self.bias = self.add_weight(
                 shape=(self.units * 3,),
-                name="bias",
+                name=f"{name}_bias",
                 initializer=bias_initializer,
                 regularizer=self.bias_regularizer,
                 constraint=self.bias_constraint,
@@ -626,7 +627,7 @@ class TKAN(RNN):
     def get_config(self):
         config = {
             "units": self.units,
-            "tkan_activations": [lay.activation for lay in self.cell.tkan_sub_layers],
+            "tkan_activations": [activations.serialize(lay.activation) for lay in self.cell.tkan_sub_layers],
             "activation": activations.serialize(self.activation),
             "recurrent_activation": activations.serialize(
                 self.recurrent_activation
