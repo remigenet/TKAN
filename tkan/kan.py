@@ -63,6 +63,7 @@ class KANLinear(Layer):
         base_activation='silu',
         grid_eps=0.02,
         grid_range=[-1, 1],
+        dropout = 0.,
         **kwargs
     ):
         super(KANLinear, self).__init__(**kwargs)
@@ -78,6 +79,8 @@ class KANLinear(Layer):
         self.base_activation = getattr(tf.nn, base_activation)
         self.grid_eps = grid_eps
         self.grid_range = grid_range
+
+        self.dropout = Dropout(dropout)
     
     def build(self, input_shape):
         super(KANLinear, self).build(input_shape)
@@ -109,7 +112,7 @@ class KANLinear(Layer):
             self.spline_weight,
             transpose_b=True
         )
-        return base_output + spline_output
+        return self.dropout(base_output) + self.dropout(spline_output)
             
     def b_splines(self, x):
         batch_size = tf.shape(x)[0]
@@ -142,4 +145,3 @@ class KANLinear(Layer):
 
     def compute_output_shape(self, input_shape):
         return input_shape[:-1] + (self.units,)
-        
