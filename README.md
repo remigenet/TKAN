@@ -21,14 +21,16 @@ It's implementation reproduce architecture of RNN in tensorflow with Cell class 
 Here is an example that demonstrates how to use TKAN with B-spline activations in a sequential model:
 
 ```python
-from temporal_kan import TKAN, BSplineActivation
+from temporal_kan import TKAN
 import tensorflow as tf
 
 # Example model using TKAN with B-spline activations
 model = tf.keras.Sequential([
       tf.keras.layers.InputLayer(input_shape=X_train_seq.shape[1:]),
-      TKAN(100, tkan_activations=[BSplineActivation(3)], return_sequences=True, use_bias=True),
-      TKAN(100, tkan_activations=[BSplineActivation(3)], return_sequences=False, use_bias=True),
+      TKAN(100, tkan_activations=[{'spline_order': 3, 'grid_size': 10}, {'spline_order': 1, 'grid_size': 5}, {'spline_order': 4, 'grid_size': 6}, ], return_sequences=True, use_bias=True), #Define the params of the KANLinear as dict as here
+      TKAN(100, tkan_activations=[1, 2, 3, 3, 4], return_sequences=True, use_bias=True), #Use float or int to specify only the exponent of the spline
+      TKAN(100, tkan_activations=['relu', 'relu', 'relu', 'relu', 'relu'], return_sequences=True, use_bias=True), #Or use string to specify the standard tensorflow activation using Dense in sublayers instead of KANLinear
+      TKAN(100, tkan_activations=[None for _ in range(3)], return_sequences=False, use_bias=True), # Or put None for default activation
       tf.keras.layers.Dense(y_train_seq.shape[1]),
 ])
 ```

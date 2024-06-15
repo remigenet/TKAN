@@ -5,7 +5,7 @@ from tensorflow.keras import constraints
 from tensorflow.keras import initializers
 from tensorflow.keras import regularizers
 from tensorflow.keras.layers import InputSpec, Layer, RNN
-from tkan import BSplineActivation, PowerSplineActivation, FixedSplineActivation
+from tkan import KANLinear
 
 
 class DropoutRNNCell:
@@ -160,7 +160,7 @@ class TKANCell(Layer, DropoutRNNCell):
                 "Received an invalid value for argument `units`, "
                 f"expected a positive integer, got {units}."
             )
-        tkan_activations = tkan_activations or [BSplineActivation(3)]
+        tkan_activations = tkan_activations or [None]
         super().__init__(**kwargs)
         self.units = units
         self.activation = activations.get(activation)
@@ -203,9 +203,11 @@ class TKANCell(Layer, DropoutRNNCell):
         
         for act in tkan_activations:
             if act is None:
-                self.tkan_sub_layers.append(tf.keras.layers.Dense(1, activation=BSplineActivation()))
+                self.tkan_sub_layers.append(KANLinear(1))
             elif isinstance(act, (int, float)):
-                self.tkan_sub_layers.append(tf.keras.layers.Dense(1, activation=FixedSplineActivation(exponent=act)))
+                self.tkan_sub_layers.append(KANLinear(1, spline_order=act))
+            elif isinstance(act, dict):
+                self.tkan_sub_layers.append(KANLinear(1, **act))
             else:
                 self.tkan_sub_layers.append(tf.keras.layers.Dense(1, activation=act))
 
@@ -213,30 +215,31 @@ class TKANCell(Layer, DropoutRNNCell):
     def build(self, input_shape):
         super().build(input_shape)
         input_dim = input_shape[-1]
+        name = self.name
         self.kernel = self.add_weight(
             shape=(input_dim, self.units * 3),
-            name="kernel",
+            name=f"{name}_kernel",
             initializer=self.kernel_initializer,
             regularizer=self.kernel_regularizer,
             constraint=self.kernel_constraint,
         )
         self.recurrent_kernel = self.add_weight(
             shape=(self.units, self.units * 3),
-            name="recurrent_kernel",
+            name=f"{name}_recurrent_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
         )
         self.sub_tkan_kernel = self.add_weight(
             shape=(len(self.tkan_sub_layers), 2),
-            name="sub_tkan_kernel",
+            name=f"{name}_sub_tkan_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
         )
         self.sub_tkan_recurrent_kernel = self.add_weight(
             shape=(len(self.tkan_sub_layers), input_shape[1] * 2),
-            name="sub_tkan_recurrent_kernel",
+            name=f"{name}_sub_tkan_recurrent_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
@@ -244,12 +247,12 @@ class TKANCell(Layer, DropoutRNNCell):
         self.aggregated_weight = self.add_weight(
             shape=(len(self.tkan_sub_layers), self.units),
             initializer='glorot_uniform',
-            name='aggregated_weight'
+            name=f'{name}_aggregated_weight'
         )
         self.aggregated_bias = self.add_weight(
             shape=(self.units,),
             initializer='zeros',
-            name='aggregated_bias'
+            name=f'{name}_aggregated_bias'
         )
         if self.use_bias:
             if self.unit_forget_bias:
@@ -266,7 +269,7 @@ class TKANCell(Layer, DropoutRNNCell):
                 bias_initializer = self.bias_initializer
             self.bias = self.add_weight(
                 shape=(self.units * 3,),
-                name="bias",
+                name=f"{name}_bias",
                 initializer=bias_initializer,
                 regularizer=self.bias_regularizer,
                 constraint=self.bias_constraint,
@@ -626,7 +629,7 @@ class TKAN(RNN):
     def get_config(self):
         config = {
             "units": self.units,
-            "tkan_activations": [lay.activation for lay in self.cell.tkan_sub_layers],
+            "tkan_activations": [activations.serialize(lay.activation) for lay in self.cell.tkan_sub_layers],
             "activation": activations.serialize(self.activation),
             "recurrent_activation": activations.serialize(
                 self.recurrent_activation

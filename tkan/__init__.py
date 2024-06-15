@@ -1,2 +1,2 @@
-from tkan.spline import BSplineActivation, PowerSplineActivation, FixedSplineActivation
+from tkan.kan import KANLinear
 from tkan.tkan import TKAN
