@@ -1,7 +1,7 @@
 
 import tensorflow as tf
-from tensorflow.keras.initializers import Initializer, HeUniform, Dropout
-from tensorflow.keras.layers import Layer
+from tensorflow.keras.initializers import Initializer, HeUniform
+from tensorflow.keras.layers import Layer, Dropout
 
 class GridInitializer(Initializer):
     """Initializes a grid for use in B-spline calculations within KANLinear layer.
