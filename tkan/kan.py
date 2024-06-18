@@ -1,7 +1,7 @@
-
 import tensorflow as tf
-from tensorflow.keras.initializers import Initializer, HeUniform
+from tensorflow.keras.initializers import Initializer, HeUniform, HeNormal
 from tensorflow.keras.layers import Layer, Dropout
+
 
 class GridInitializer(Initializer):
     """Initializes a grid for use in B-spline calculations within KANLinear layer.
@@ -32,7 +32,7 @@ class GridInitializer(Initializer):
             "grid_size": self.grid_size,
             "spline_order": self.spline_order
         }
-
+        
 class KANLinear(Layer):
     """Custom Keras layer that implements Kernel Additive Networks (KAN) with B-spline transformations.
 
@@ -96,17 +96,23 @@ class KANLinear(Layer):
         self.base_weight = self.add_weight(
             name="base_weight",
             shape=[self.units, self.in_features],
-            initializer=HeUniform
+            initializer=HeNormal
+        )
+        
+        self.base_bias = self.add_weight(
+            name="base_bias",
+            shape=[self.units,],
+            initializer=HeNormal
         )
 
         self.spline_weight = self.add_weight(
             name="spline_weight",
             shape=[self.units, self.in_features * (self.grid_size + self.spline_order)],
-            initializer=HeUniform
+            initializer='ones'
         )
 
     def call(self, x):
-        base_output = tf.matmul(self.base_activation(x), self.base_weight, transpose_b=True)
+        base_output = tf.matmul(self.base_activation(x), self.base_weight, transpose_b=True) + self.base_bias
         spline_output = tf.matmul(
             self.b_splines(x),
             self.spline_weight,
@@ -116,8 +122,7 @@ class KANLinear(Layer):
             
     def b_splines(self, x):
         batch_size = tf.shape(x)[0]
-        x_expanded = tf.expand_dims(x, -1)  
-        
+        x_expanded = tf.expand_dims(x, -1)   
         
         grid = self.grid  
         grid_expanded = tf.expand_dims(grid, 0)  
