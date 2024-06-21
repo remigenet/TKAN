@@ -5,8 +5,8 @@ from tensorflow.keras import constraints
 from tensorflow.keras import initializers
 from tensorflow.keras import regularizers
 from tensorflow.keras.layers import InputSpec, Layer, RNN
-from tkan import KANLinear
 
+from tkan import KANLinear
 
 class DropoutRNNCell:
     """Direct copy of the keras class (https://github.com/keras-team/keras/blob/v3.3.3/keras/src/layers/rnn/dropout_rnn_cell.py)
@@ -137,6 +137,8 @@ class TKANCell(Layer, DropoutRNNCell):
         self,
         units,
         tkan_activations=None,
+        sub_kan_output_dim = None,
+        sub_kan_input_dim = None,
         activation="tanh",
         recurrent_activation="sigmoid",
         use_bias=True,
@@ -160,7 +162,7 @@ class TKANCell(Layer, DropoutRNNCell):
                 "Received an invalid value for argument `units`, "
                 f"expected a positive integer, got {units}."
             )
-        tkan_activations = tkan_activations or [None]
+        self.tkan_activations = tkan_activations or [None]
         super().__init__(**kwargs)
         self.units = units
         self.activation = activations.get(activation)
@@ -185,6 +187,9 @@ class TKANCell(Layer, DropoutRNNCell):
         self.recurrent_dropout = min(1.0, max(0.0, recurrent_dropout))
         self.seed = seed
 
+        self.sub_kan_output_dim = sub_kan_output_dim
+        self.sub_kan_input_dim = sub_kan_input_dim
+
 
         if seed is not None:
             self.seed_generator = tf.random.experimental.Generator.from_seed(seed=seed)
@@ -196,26 +201,34 @@ class TKANCell(Layer, DropoutRNNCell):
                 self.seed_generator = tf.random.experimental.Generator.from_seed(seed=0)
 
         self.unit_forget_bias = unit_forget_bias
-        self.state_size = [units, units] + [1 for _ in tkan_activations]
+        self.state_size = [units, units] + [1 for _ in self.tkan_activations]
         self.output_size = units
-
-        self.tkan_sub_layers = []
-        
-        for act in tkan_activations:
-            if act is None:
-                self.tkan_sub_layers.append(KANLinear(1))
-            elif isinstance(act, (int, float)):
-                self.tkan_sub_layers.append(KANLinear(1, spline_order=act))
-            elif isinstance(act, dict):
-                self.tkan_sub_layers.append(KANLinear(1, **act))
-            else:
-                self.tkan_sub_layers.append(tf.keras.layers.Dense(1, activation=act))
 
 
     def build(self, input_shape):
         super().build(input_shape)
-        input_dim = input_shape[-1]
         name = self.name
+        input_dim = input_shape[-1]
+        if self.sub_kan_input_dim is None:
+            self.sub_kan_input_dim = input_dim
+        if self.sub_kan_output_dim is None:
+            self.sub_kan_output_dim = input_dim
+            
+        self.tkan_sub_layers = []
+
+        for act in self.tkan_activations:
+            if act is None:
+
+                self.tkan_sub_layers.append(KANLinear(self.sub_kan_output_dim, use_layernorm=True))  
+            elif isinstance(act, (int, float)):
+
+                self.tkan_sub_layers.append(KANLinear(self.sub_kan_output_dim, spline_order=act, use_layernorm=True))
+            elif isinstance(act, dict):
+
+                self.tkan_sub_layers.append(KANLinear(self.sub_kan_output_dim, **act, use_layernorm=True))
+            else:
+                self.tkan_sub_layers.append(tf.keras.layers.Dense(self.sub_kan_output_dim, activation=act))
+
         self.kernel = self.add_weight(
             shape=(input_dim, self.units * 3),
             name=f"{name}_kernel",
@@ -231,21 +244,28 @@ class TKANCell(Layer, DropoutRNNCell):
             constraint=self.recurrent_constraint,
         )
         self.sub_tkan_kernel = self.add_weight(
-            shape=(len(self.tkan_sub_layers), 2),
+            shape=(len(self.tkan_sub_layers), self.sub_kan_output_dim  * 2),
             name=f"{name}_sub_tkan_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
         )
-        self.sub_tkan_recurrent_kernel = self.add_weight(
-            shape=(len(self.tkan_sub_layers), input_shape[1] * 2),
+        self.sub_tkan_recurrent_kernel_inputs = self.add_weight(
+            shape=(len(self.tkan_sub_layers), input_shape[1], self.sub_kan_input_dim),
+            name=f"{name}_sub_tkan_recurrent_kernel",
+            initializer=self.recurrent_initializer,
+            regularizer=self.recurrent_regularizer,
+            constraint=self.recurrent_constraint,
+        )
+        self.sub_tkan_recurrent_kernel_states = self.add_weight(
+            shape=(len(self.tkan_sub_layers), self.sub_kan_output_dim, self.sub_kan_input_dim),
             name=f"{name}_sub_tkan_recurrent_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
         )
         self.aggregated_weight = self.add_weight(
-            shape=(len(self.tkan_sub_layers), self.units),
+            shape=(len(self.tkan_sub_layers) * self.sub_kan_output_dim, self.units),
             initializer='glorot_uniform',
             name=f'{name}_aggregated_weight'
         )
@@ -278,7 +298,7 @@ class TKANCell(Layer, DropoutRNNCell):
             self.bias = None
 
         for layer in self.tkan_sub_layers:
-            layer.build((input_shape[0], input_shape[1]))
+            layer.build((input_shape[0], self.sub_kan_input_dim))
 
         self.built = True
 
@@ -308,10 +328,10 @@ class TKANCell(Layer, DropoutRNNCell):
 
         # Process each sub-layer
         for idx, (sub_layer, sub_state) in enumerate(zip(self.tkan_sub_layers, sub_states)):
-            sub_kernel_h, sub_kernel_x = tf.split(self.sub_tkan_recurrent_kernel[idx, :], 2, axis=0)
-            agg_input = inputs * sub_kernel_x + sub_state * sub_kernel_h
+            sub_kernel_x, sub_kernel_h = self.sub_tkan_recurrent_kernel_inputs[idx], self.sub_tkan_recurrent_kernel_states[idx]
+            agg_input = inputs @ sub_kernel_x + sub_state @ sub_kernel_h
             sub_output = sub_layer(agg_input)
-            sub_recurrent_kernel_h, sub_recurrent_kernel_x = tf.split(self.sub_tkan_kernel[idx, :], 2, axis=0)
+            sub_recurrent_kernel_h, sub_recurrent_kernel_x = tf.split(self.sub_tkan_kernel[idx], 2, axis=0)
             new_sub_state = sub_recurrent_kernel_h * sub_output + sub_state * sub_recurrent_kernel_x
 
             sub_outputs = sub_outputs.write(idx, sub_output)
@@ -378,7 +398,7 @@ class TKANCell(Layer, DropoutRNNCell):
         return [
             tf.zeros((batch_size, self.units), dtype=dtype),
             tf.zeros((batch_size, self.units), dtype=dtype)
-        ] + [tf.zeros((batch_size, 1), dtype=dtype) for _ in range(len(self.tkan_sub_layers))]
+        ] + [tf.zeros((batch_size, self.sub_kan_output_dim), dtype=dtype) for _ in range(len(self.tkan_sub_layers))]
 
 
 
@@ -489,6 +509,8 @@ class TKAN(RNN):
         self,
         units,
         tkan_activations=None,
+        sub_kan_output_dim = None,
+        sub_kan_input_dim = None,
         activation="tanh",
         recurrent_activation="sigmoid",
         use_bias=True,
@@ -517,6 +539,8 @@ class TKAN(RNN):
         cell = TKANCell(
             units,
             tkan_activations=tkan_activations,
+            sub_kan_output_dim = sub_kan_output_dim,
+            sub_kan_input_dim = sub_kan_input_dim,
             activation=activation,
             recurrent_activation=recurrent_activation,
             use_bias=use_bias,
@@ -566,6 +590,14 @@ class TKAN(RNN):
     def units(self):
         return self.cell.units
 
+    @property
+    def sub_kan_output_dim(self):
+        return self.cell.sub_kan_output_dim
+
+    @property
+    def sub_kan_input_dim(self):
+        return self.cell.sub_kan_input_dim
+    
     @property
     def activation(self):
         return self.cell.activation
@@ -629,7 +661,10 @@ class TKAN(RNN):
     def get_config(self):
         config = {
             "units": self.units,
-            "tkan_activations": [activations.serialize(lay.activation) for lay in self.cell.tkan_sub_layers],
+            "tkan_activations": [lay for lay in self.cell.tkan_activations],
+            "tkan_sub_layers": [tf.keras.layers.serialize(lay) for lay in self.cell.tkan_sub_layers],
+            "sub_kan_output_dim": self.sub_kan_output_dim,
+            "sub_kan_input_dim": self.sub_kan_input_dim,
             "activation": activations.serialize(self.activation),
             "recurrent_activation": activations.serialize(
                 self.recurrent_activation
