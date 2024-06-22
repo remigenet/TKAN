@@ -1,6 +1,8 @@
 # TKAN: Temporal Kolmogorov-Arnold Networks
 
 TKAN (Temporal Kolmogorov-Arnold Networks) is a neural network architecture designed to enhance multi-horizon time series forecasting. This TensorFlow implementation integrates TKAN as a layer within sequential models, facilitating the use of advanced neural network techniques in practical applications. It is the original implementation of the [paper](https://arxiv.org/abs/2405.07344)
+The KAN part implementation has been inspired from [efficient_kan](https://github.com/Blealtan/efficient-kan) and works similarly to it, thus not exactly like the [original implementation](https://github.com/KindXiaoming/pykan).
+
 
 ![TKAN representation](image/TKAN.drawio.png)
 
@@ -18,11 +20,12 @@ Dependencies are managed using pyproject.toml.
 
 TKAN can be used within TensorFlow models to handle complex sequential patterns in data.
 It's implementation reproduce architecture of RNN in tensorflow with Cell class and Layer that inherits from RNN in order to provide a perfect integrations with tensorflow.
-Here is an example that demonstrates how to use TKAN with B-spline activations in a sequential model:
+Here is an example that demonstrates how to use TKAN in a sequential model:
 
 ```python
-from temporal_kan import TKAN
 import tensorflow as tf
+from tkan import TKAN
+
 
 # Example model using TKAN with B-spline activations
 model = tf.keras.Sequential([
@@ -35,15 +38,8 @@ model = tf.keras.Sequential([
 ])
 ```
 
-You can find a more complete example with comparison with LSTM in the example folder.
+You can find a more complete example with comparison with other models in the example folder.
 
-### Activation Function Flexibility
-
-TKAN layers are highly flexible with regards to activation functions. They can be configured using various types of activations:
-- *Callable classes*: Custom classes like BSplineActivation allow for sophisticated configurations.
-- *Integers or floats*: Specify an initial exponent for a simple power spline activation.
-- *None*: Defaults to BSplineActivation with an order of 3.
-- *Strings*: Utilizes standard TensorFlow activation functions.
 
 Shield: [![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]
 
