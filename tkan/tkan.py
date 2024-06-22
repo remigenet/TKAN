@@ -210,7 +210,7 @@ class TKANCell(Layer, DropoutRNNCell):
         name = self.name
         input_dim = input_shape[-1]
         if self.sub_kan_input_dim is None:
-            self.sub_kan_input_dim = input_dim
+            self.sub_kan_input_dim = 1
         if self.sub_kan_output_dim is None:
             self.sub_kan_output_dim = input_dim
             
