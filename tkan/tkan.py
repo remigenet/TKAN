@@ -229,6 +229,10 @@ class TKANCell(Layer, DropoutRNNCell):
             else:
                 self.tkan_sub_layers.append(tf.keras.layers.Dense(self.sub_kan_output_dim, activation=act))
 
+    def build(self, input_shape):
+        super().build(input_shape)
+        name = self.name
+        input_dim = input_shape[-1]
         self.kernel = self.add_weight(
             shape=(input_dim, self.units * 3),
             name=f"{name}_kernel",
@@ -661,10 +665,7 @@ class TKAN(RNN):
     def get_config(self):
         config = {
             "units": self.units,
-            "tkan_activations": [lay for lay in self.cell.tkan_activations],
-            "tkan_sub_layers": [tf.keras.layers.serialize(lay) for lay in self.cell.tkan_sub_layers],
-            "sub_kan_output_dim": self.sub_kan_output_dim,
-            "sub_kan_input_dim": self.sub_kan_input_dim,
+            "tkan_activations": [lay.activation for lay in self.cell.tkan_sub_layers],
             "activation": activations.serialize(self.activation),
             "recurrent_activation": activations.serialize(
                 self.recurrent_activation
