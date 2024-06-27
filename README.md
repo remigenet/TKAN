@@ -43,14 +43,11 @@ You can find a more complete example with comparison with other models in the ex
 Please cite our work if you use this repo:
 
 ```
-@misc{genetinzirillotkan,
-      title={TKAN: Temporal Kolmogorov-Arnold Networks}, 
-      author={Remi Genet, Hugo Inzirillo},
-      year={2024},
-      eprint={2405.07344},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2405.07344}, 
+@article{genet2024tkan,
+  title={Tkan: Temporal kolmogorov-arnold networks},
+  author={Genet, Remi and Inzirillo, Hugo},
+  journal={arXiv preprint arXiv:2405.07344},
+  year={2024}
 }
 ```
 
