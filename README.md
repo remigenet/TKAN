@@ -41,8 +41,9 @@ model = tf.keras.Sequential([
 You can find a more complete example with comparison with other models in the example folder.
 
 Please cite our work if you use this repo:
+
 ```
-@misc{bresson2024kagnn,
+@misc{genetinzirillotkan,
       title={TKAN: Temporal Kolmogorov-Arnold Networks}, 
       author={Remi Genet, Hugo Inzirillo},
       year={2024},
