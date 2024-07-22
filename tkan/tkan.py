@@ -6,7 +6,8 @@ from tensorflow.keras import initializers
 from tensorflow.keras import regularizers
 from tensorflow.keras.layers import InputSpec, Layer, RNN
 
-from tkan import KANLinear
+from keras_efficient_kan import KANLinear
+
 
 class DropoutRNNCell:
     """Direct copy of the keras class (https://github.com/keras-team/keras/blob/v3.3.3/keras/src/layers/rnn/dropout_rnn_cell.py)
@@ -136,9 +137,9 @@ class TKANCell(Layer, DropoutRNNCell):
     def __init__(
         self,
         units,
-        tkan_activations=None,
-        sub_kan_output_dim = None,
-        sub_kan_input_dim = None,
+        sub_kan_configs=None,
+        sub_kan_output_dim=None,
+        sub_kan_input_dim=None,
         activation="tanh",
         recurrent_activation="sigmoid",
         use_bias=True,
@@ -157,155 +158,120 @@ class TKANCell(Layer, DropoutRNNCell):
         seed=None,
         **kwargs,
     ):
-        if units <= 0:
-            raise ValueError(
-                "Received an invalid value for argument `units`, "
-                f"expected a positive integer, got {units}."
-            )
-        self.tkan_activations = tkan_activations or [None]
         super().__init__(**kwargs)
         self.units = units
+        self.sub_kan_configs = sub_kan_configs or [None]
+        self.sub_kan_output_dim = sub_kan_output_dim
+        self.sub_kan_input_dim = sub_kan_input_dim
         self.activation = activations.get(activation)
         self.recurrent_activation = activations.get(recurrent_activation)
         self.use_bias = use_bias
-
         self.kernel_initializer = initializers.get(kernel_initializer)
         self.recurrent_initializer = initializers.get(recurrent_initializer)
-        self.sub_tkan_initializer = initializers.get(recurrent_initializer)
-        self.recurrent_sub_tkan_initializer = initializers.get(recurrent_initializer)
         self.bias_initializer = initializers.get(bias_initializer)
-
+        self.unit_forget_bias = unit_forget_bias
         self.kernel_regularizer = regularizers.get(kernel_regularizer)
         self.recurrent_regularizer = regularizers.get(recurrent_regularizer)
         self.bias_regularizer = regularizers.get(bias_regularizer)
-
         self.kernel_constraint = constraints.get(kernel_constraint)
         self.recurrent_constraint = constraints.get(recurrent_constraint)
         self.bias_constraint = constraints.get(bias_constraint)
-
         self.dropout = min(1.0, max(0.0, dropout))
         self.recurrent_dropout = min(1.0, max(0.0, recurrent_dropout))
         self.seed = seed
-
-        self.sub_kan_output_dim = sub_kan_output_dim
-        self.sub_kan_input_dim = sub_kan_input_dim
-
-
-        if seed is not None:
-            self.seed_generator = tf.random.experimental.Generator.from_seed(seed=seed)
-        else:
-            try:
-                self.seed_generator = tf.random.experimental.Generator.from_non_deterministic_state()
-            except RuntimeError:
-                # Fallback to a deterministic generator with a fixed seed
-                self.seed_generator = tf.random.experimental.Generator.from_seed(seed=0)
-
-        self.unit_forget_bias = unit_forget_bias
-        self.state_size = [units, units] + [1 for _ in self.tkan_activations]
+        self.state_size = [units, units] + [1 for _ in self.sub_kan_configs]
         self.output_size = units
 
-
     def build(self, input_shape):
-        super().build(input_shape)
-        name = self.name
         input_dim = input_shape[-1]
+        
+        # Set default values if None
         if self.sub_kan_input_dim is None:
             self.sub_kan_input_dim = 1
         if self.sub_kan_output_dim is None:
             self.sub_kan_output_dim = input_dim
-            
-        self.tkan_sub_layers = []
-
-        for act in self.tkan_activations:
-            if act is None:
-
-                self.tkan_sub_layers.append(KANLinear(self.sub_kan_output_dim, use_layernorm=True))  
-            elif isinstance(act, (int, float)):
-
-                self.tkan_sub_layers.append(KANLinear(self.sub_kan_output_dim, spline_order=act, use_layernorm=True))
-            elif isinstance(act, dict):
-
-                self.tkan_sub_layers.append(KANLinear(self.sub_kan_output_dim, **act, use_layernorm=True))
-            else:
-                self.tkan_sub_layers.append(tf.keras.layers.Dense(self.sub_kan_output_dim, activation=act))
-
-    def build(self, input_shape):
-        super().build(input_shape)
-        name = self.name
-        input_dim = input_shape[-1]
+    
         self.kernel = self.add_weight(
             shape=(input_dim, self.units * 3),
-            name=f"{name}_kernel",
+            name="kernel",
             initializer=self.kernel_initializer,
             regularizer=self.kernel_regularizer,
             constraint=self.kernel_constraint,
         )
         self.recurrent_kernel = self.add_weight(
             shape=(self.units, self.units * 3),
-            name=f"{name}_recurrent_kernel",
+            name="recurrent_kernel",
             initializer=self.recurrent_initializer,
             regularizer=self.recurrent_regularizer,
             constraint=self.recurrent_constraint,
         )
-        self.sub_tkan_kernel = self.add_weight(
-            shape=(len(self.tkan_sub_layers), self.sub_kan_output_dim  * 2),
-            name=f"{name}_sub_tkan_kernel",
-            initializer=self.recurrent_initializer,
-            regularizer=self.recurrent_regularizer,
-            constraint=self.recurrent_constraint,
-        )
-        self.sub_tkan_recurrent_kernel_inputs = self.add_weight(
-            shape=(len(self.tkan_sub_layers), input_shape[1], self.sub_kan_input_dim),
-            name=f"{name}_sub_tkan_recurrent_kernel",
-            initializer=self.recurrent_initializer,
-            regularizer=self.recurrent_regularizer,
-            constraint=self.recurrent_constraint,
-        )
-        self.sub_tkan_recurrent_kernel_states = self.add_weight(
-            shape=(len(self.tkan_sub_layers), self.sub_kan_output_dim, self.sub_kan_input_dim),
-            name=f"{name}_sub_tkan_recurrent_kernel",
-            initializer=self.recurrent_initializer,
-            regularizer=self.recurrent_regularizer,
-            constraint=self.recurrent_constraint,
-        )
-        self.aggregated_weight = self.add_weight(
-            shape=(len(self.tkan_sub_layers) * self.sub_kan_output_dim, self.units),
-            initializer='glorot_uniform',
-            name=f'{name}_aggregated_weight'
-        )
-        self.aggregated_bias = self.add_weight(
-            shape=(self.units,),
-            initializer='zeros',
-            name=f'{name}_aggregated_bias'
-        )
+    
         if self.use_bias:
             if self.unit_forget_bias:
                 def bias_initializer(_, *args, **kwargs):
-                    return tf.concat(
-                        [
-                            self.bias_initializer((self.units,), *args, **kwargs),
-                            initializers.get("ones")((self.units,), *args, **kwargs),
-                            self.bias_initializer((self.units,), *args, **kwargs),
-                        ],
-                        axis=0
-                    )
+                    return tf.keras.backend.concatenate([
+                        self.bias_initializer((self.units,), *args, **kwargs),
+                        initializers.get("ones")((self.units,), *args, **kwargs),
+                        self.bias_initializer((self.units,), *args, **kwargs),
+                    ])
             else:
                 bias_initializer = self.bias_initializer
             self.bias = self.add_weight(
                 shape=(self.units * 3,),
-                name=f"{name}_bias",
+                name="bias",
                 initializer=bias_initializer,
                 regularizer=self.bias_regularizer,
                 constraint=self.bias_constraint,
             )
         else:
             self.bias = None
-
-        for layer in self.tkan_sub_layers:
-            layer.build((input_shape[0], self.sub_kan_input_dim))
-
+    
+        self.tkan_sub_layers = []
+        for config in self.sub_kan_configs:
+            if config is None:
+                layer = KANLinear(self.sub_kan_output_dim, use_layernorm=True)
+            elif isinstance(config, (int, float)):
+                layer = KANLinear(self.sub_kan_output_dim, spline_order=config, use_layernorm=True)
+            elif isinstance(config, dict):
+                layer = KANLinear(self.sub_kan_output_dim, **config, use_layernorm=True)
+            else:
+                layer = tf.keras.layers.Dense(self.sub_kan_output_dim, activation=config)
+            self.tkan_sub_layers.append(layer)
+    
+        self.sub_tkan_kernel = self.add_weight(
+            shape=(len(self.tkan_sub_layers), self.sub_kan_output_dim * 2),
+            name="sub_tkan_kernel",
+            initializer=self.recurrent_initializer,
+            regularizer=self.recurrent_regularizer,
+            constraint=self.recurrent_constraint,
+        )
+        self.sub_tkan_recurrent_kernel_inputs = self.add_weight(
+            shape=(len(self.tkan_sub_layers), input_shape[-1], self.sub_kan_input_dim),
+            name="sub_tkan_recurrent_kernel_inputs",
+            initializer=self.recurrent_initializer,
+            regularizer=self.recurrent_regularizer,
+            constraint=self.recurrent_constraint,
+        )
+        self.sub_tkan_recurrent_kernel_states = self.add_weight(
+            shape=(len(self.tkan_sub_layers), self.sub_kan_output_dim, self.sub_kan_input_dim),
+            name="sub_tkan_recurrent_kernel_states",
+            initializer=self.recurrent_initializer,
+            regularizer=self.recurrent_regularizer,
+            constraint=self.recurrent_constraint,
+        )
+        self.aggregated_weight = self.add_weight(
+            shape=(len(self.tkan_sub_layers) * self.sub_kan_output_dim, self.units),
+            name="aggregated_weight",
+            initializer="glorot_uniform",
+        )
+        self.aggregated_bias = self.add_weight(
+            shape=(self.units,),
+            name="aggregated_bias",
+            initializer="zeros",
+        )
+    
         self.built = True
-
+    
     def call(self, inputs, states, training=False):
         h_tm1 = states[0]  # Previous memory state for the LSTM part.
         c_tm1 = states[1]  # Previous carry state for the LSTM part.
@@ -361,42 +327,35 @@ class TKANCell(Layer, DropoutRNNCell):
 
 
     def get_config(self):
-        config = {
+        config = super().get_config()
+        config.update({
             "units": self.units,
+            "sub_kan_configs": self.sub_kan_configs,
+            "sub_kan_output_dim": self.sub_kan_output_dim,
+            "sub_kan_input_dim": self.sub_kan_input_dim,
             "activation": activations.serialize(self.activation),
-            "tkan_sub_layers": self.tkan_sub_layers,
-            "activation": activations.serialize(self.activation),
-            "recurrent_activation": activations.serialize(
-                self.recurrent_activation
-            ),
+            "recurrent_activation": activations.serialize(self.recurrent_activation),
             "use_bias": self.use_bias,
-            "unit_forget_bias": self.unit_forget_bias,
-            "kernel_initializer": initializers.serialize(
-                self.kernel_initializer
-            ),
-            "recurrent_initializer": initializers.serialize(
-                self.recurrent_initializer
-            ),
+            "kernel_initializer": initializers.serialize(self.kernel_initializer),
+            "recurrent_initializer": initializers.serialize(self.recurrent_initializer),
             "bias_initializer": initializers.serialize(self.bias_initializer),
-            "kernel_regularizer": regularizers.serialize(
-                self.kernel_regularizer
-            ),
-            "recurrent_regularizer": regularizers.serialize(
-                self.recurrent_regularizer
-            ),
+            "unit_forget_bias": self.unit_forget_bias,
+            "kernel_regularizer": regularizers.serialize(self.kernel_regularizer),
+            "recurrent_regularizer": regularizers.serialize(self.recurrent_regularizer),
             "bias_regularizer": regularizers.serialize(self.bias_regularizer),
             "kernel_constraint": constraints.serialize(self.kernel_constraint),
-            "recurrent_constraint": constraints.serialize(
-                self.recurrent_constraint
-            ),
+            "recurrent_constraint": constraints.serialize(self.recurrent_constraint),
             "bias_constraint": constraints.serialize(self.bias_constraint),
             "dropout": self.dropout,
             "recurrent_dropout": self.recurrent_dropout,
             "seed": self.seed,
-        }
-        base_config = super().get_config()
-        return {**base_config, **config}
+        })
+        return config
 
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+        
     def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
         dtype = dtype or self.compute_dtype
         return [
@@ -508,13 +467,12 @@ class TKAN(RNN):
             call of the cell (optional, `None` causes creation
             of zero-filled initial state tensors). Defaults to `None`.
     """
-
     def __init__(
         self,
         units,
-        tkan_activations=None,
-        sub_kan_output_dim = None,
-        sub_kan_input_dim = None,
+        sub_kan_configs=None,
+        sub_kan_output_dim=None,
+        sub_kan_input_dim=None,
         activation="tanh",
         recurrent_activation="sigmoid",
         use_bias=True,
@@ -531,27 +489,25 @@ class TKAN(RNN):
         bias_constraint=None,
         dropout=0.0,
         recurrent_dropout=0.0,
-        seed=None,
         return_sequences=False,
         return_state=False,
         go_backwards=False,
         stateful=False,
         unroll=False,
-        use_cudnn="auto",
         **kwargs,
     ):
         cell = TKANCell(
             units,
-            tkan_activations=tkan_activations,
-            sub_kan_output_dim = sub_kan_output_dim,
-            sub_kan_input_dim = sub_kan_input_dim,
+            sub_kan_configs=sub_kan_configs,
+            sub_kan_output_dim=sub_kan_output_dim,
+            sub_kan_input_dim=sub_kan_input_dim,
             activation=activation,
             recurrent_activation=recurrent_activation,
             use_bias=use_bias,
             kernel_initializer=kernel_initializer,
-            unit_forget_bias=unit_forget_bias,
             recurrent_initializer=recurrent_initializer,
             bias_initializer=bias_initializer,
+            unit_forget_bias=unit_forget_bias,
             kernel_regularizer=kernel_regularizer,
             recurrent_regularizer=recurrent_regularizer,
             bias_regularizer=bias_regularizer,
@@ -560,10 +516,7 @@ class TKAN(RNN):
             bias_constraint=bias_constraint,
             dropout=dropout,
             recurrent_dropout=recurrent_dropout,
-            dtype=kwargs.get("dtype", None),
-            trainable=kwargs.get("trainable", True),
-            name="tkan_cell",
-            seed=seed,
+            dtype=kwargs.get("dtype"),
         )
         super().__init__(
             cell,
@@ -572,11 +525,11 @@ class TKAN(RNN):
             go_backwards=go_backwards,
             stateful=stateful,
             unroll=unroll,
-            activity_regularizer=activity_regularizer,
             **kwargs,
         )
+        self.activity_regularizer = regularizers.get(activity_regularizer)
         self.input_spec = [InputSpec(ndim=3)]
-        
+
 
     def inner_loop(self, sequences, initial_state, mask, training=False):
         if isinstance(mask, (list, tuple)):
@@ -594,6 +547,10 @@ class TKAN(RNN):
     def units(self):
         return self.cell.units
 
+    @property
+    def sub_kan_configs(self):
+        return self.cell.sub_kan_configs
+    
     @property
     def sub_kan_output_dim(self):
         return self.cell.sub_kan_output_dim
@@ -665,38 +622,25 @@ class TKAN(RNN):
     def get_config(self):
         config = {
             "units": self.units,
-            "tkan_activations": [lay.activation for lay in self.cell.tkan_sub_layers],
-            "activation": activations.serialize(self.activation),
-            "recurrent_activation": activations.serialize(
-                self.recurrent_activation
-            ),
-            "use_bias": self.use_bias,
-            "kernel_initializer": initializers.serialize(
-                self.kernel_initializer
-            ),
-            "recurrent_initializer": initializers.serialize(
-                self.recurrent_initializer
-            ),
-            "bias_initializer": initializers.serialize(self.bias_initializer),
-            "unit_forget_bias": self.unit_forget_bias,
-            "kernel_regularizer": regularizers.serialize(
-                self.kernel_regularizer
-            ),
-            "recurrent_regularizer": regularizers.serialize(
-                self.recurrent_regularizer
-            ),
-            "bias_regularizer": regularizers.serialize(self.bias_regularizer),
-            "activity_regularizer": regularizers.serialize(
-                self.activity_regularizer
-            ),
-            "kernel_constraint": constraints.serialize(self.kernel_constraint),
-            "recurrent_constraint": constraints.serialize(
-                self.recurrent_constraint
-            ),
-            "bias_constraint": constraints.serialize(self.bias_constraint),
-            "dropout": self.dropout,
-            "recurrent_dropout": self.recurrent_dropout,
-            "seed": self.cell.seed,
+            "sub_kan_configs": self.cell.sub_kan_configs,
+            "sub_kan_output_dim": self.cell.sub_kan_output_dim,
+            "sub_kan_input_dim": self.cell.sub_kan_input_dim,
+            "activation": activations.serialize(self.cell.activation),
+            "recurrent_activation": activations.serialize(self.cell.recurrent_activation),
+            "use_bias": self.cell.use_bias,
+            "kernel_initializer": initializers.serialize(self.cell.kernel_initializer),
+            "recurrent_initializer": initializers.serialize(self.cell.recurrent_initializer),
+            "bias_initializer": initializers.serialize(self.cell.bias_initializer),
+            "unit_forget_bias": self.cell.unit_forget_bias,
+            "kernel_regularizer": regularizers.serialize(self.cell.kernel_regularizer),
+            "recurrent_regularizer": regularizers.serialize(self.cell.recurrent_regularizer),
+            "bias_regularizer": regularizers.serialize(self.cell.bias_regularizer),
+            "activity_regularizer": regularizers.serialize(self.activity_regularizer),
+            "kernel_constraint": constraints.serialize(self.cell.kernel_constraint),
+            "recurrent_constraint": constraints.serialize(self.cell.recurrent_constraint),
+            "bias_constraint": constraints.serialize(self.cell.bias_constraint),
+            "dropout": self.cell.dropout,
+            "recurrent_dropout": self.cell.recurrent_dropout,
         }
         base_config = super().get_config()
         del base_config["cell"]

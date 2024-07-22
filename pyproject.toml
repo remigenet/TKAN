@@ -14,3 +14,4 @@ packages = [{include = "tkan"}]
 python = ">=3.9,<4.0" 
 numpy = ">=1.2,<2"
 tensorflow = ">=2.8,<3" 
+keras_efficient_kan = "^0.1.4"
