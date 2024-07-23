@@ -1,70 +1,25 @@
-import tensorflow as tf
-from tensorflow.keras import activations
-from tensorflow.keras import backend as K
-from tensorflow.keras import constraints
-from tensorflow.keras import initializers
-from tensorflow.keras import regularizers
-from tensorflow.keras.layers import InputSpec, Layer, RNN
+import time
+import keras
+from keras import ops
+from keras import random
+from keras import activations
+from keras import backend as K
+from keras import constraints
+from keras import initializers
+from keras import regularizers
+from keras.layers import InputSpec, Layer, RNN, Dense
 
+# Assume KANLinear is defined elsewhere in a backend-agnostic manner
 from keras_efficient_kan import KANLinear
 
+def get_backend():
+    import os
+    return os.environ.get('KERAS_BACKEND', 'tensorflow')
 
-class DropoutRNNCell:
-    """Direct copy of the keras class (https://github.com/keras-team/keras/blob/v3.3.3/keras/src/layers/rnn/dropout_rnn_cell.py)
-    Object that holds dropout-related functionality for RNN cells.
-
-    This class is not a standalone RNN cell. It suppose to be used with a RNN
-    cell by multiple inheritance. Any cell that mix with class should have
-    following fields:
-
-    - `dropout`: a float number in the range `[0, 1]`.
-        Dropout rate for the input tensor.
-    - `recurrent_dropout`: a float number in the range `[0, 1]`.
-        Dropout rate for the recurrent connections.
-    - `seed_generator`, an instance of `backend.random.SeedGenerator`.
-
-    This object will create and cache dropout masks, and reuse them for
-    all incoming steps, so that the same mask is used for every step.
-    """
-
-    def get_dropout_mask(self, step_input):
-        if not hasattr(self, "_dropout_mask"):
-            self._dropout_mask = None
-        if self._dropout_mask is None and self.dropout > 0:
-            ones = tf.ones_like(step_input)
-            self._dropout_mask = K.dropout(
-                ones, level=self.dropout, seed=self.seed_generator
-            )
-        return self._dropout_mask
-
-    def get_recurrent_dropout_mask(self, step_input):
-        if not hasattr(self, "_recurrent_dropout_mask"):
-            self._recurrent_dropout_mask = None
-        if self._recurrent_dropout_mask is None and self.recurrent_dropout > 0:
-            ones = tf.ones_like(step_input)
-            self._recurrent_dropout_mask = K.dropout(
-                ones, level=self.recurrent_dropout, seed=self.seed_generator
-            )
-        return self._recurrent_dropout_mask
-
-    def reset_dropout_mask(self):
-        """Reset the cached dropout mask if any.
-
-        The RNN layer invokes this in the `call()` method
-        so that the cached mask is cleared after calling `cell.call()`. The
-        mask should be cached across all timestep within the same batch, but
-        shouldn't be cached between batches.
-        """
-        self._dropout_mask = None
-
-    def reset_recurrent_dropout_mask(self):
-        self._recurrent_dropout_mask = None
-
-
-@tf.keras.utils.register_keras_serializable(package="tkan", name="TKANCell")
-class TKANCell(Layer, DropoutRNNCell):
+@keras.utils.register_keras_serializable(package="tkan", name="TKANCell")
+class TKANCell(Layer):
     """Cell class for the TKAN layer.
-    Modification of the LSTM implementation in tensorflow in order to provide fully seamless integration within the framework
+    Modification of the LSTM implementation in keras 3 in order to provide fully seamless integration with TF, torch and jax backend
 
     This class processes one step within the whole time sequence input, whereas
     `TKAN` processes the whole sequence.
@@ -176,16 +131,19 @@ class TKANCell(Layer, DropoutRNNCell):
         self.kernel_constraint = constraints.get(kernel_constraint)
         self.recurrent_constraint = constraints.get(recurrent_constraint)
         self.bias_constraint = constraints.get(bias_constraint)
+        self._dropout_mask = None
         self.dropout = min(1.0, max(0.0, dropout))
+        self._recurrent_dropout_mask = None
         self.recurrent_dropout = min(1.0, max(0.0, recurrent_dropout))
-        self.seed = seed
+        self.seed = seed if seed is not None else int(time.time())
         self.state_size = [units, units] + [1 for _ in self.sub_kan_configs]
         self.output_size = units
+        self.backend = get_backend()
+    
 
     def build(self, input_shape):
         input_dim = input_shape[-1]
         
-        # Set default values if None
         if self.sub_kan_input_dim is None:
             self.sub_kan_input_dim = 1
         if self.sub_kan_output_dim is None:
@@ -209,7 +167,7 @@ class TKANCell(Layer, DropoutRNNCell):
         if self.use_bias:
             if self.unit_forget_bias:
                 def bias_initializer(_, *args, **kwargs):
-                    return tf.keras.backend.concatenate([
+                    return ops.concatenate([
                         self.bias_initializer((self.units,), *args, **kwargs),
                         initializers.get("ones")((self.units,), *args, **kwargs),
                         self.bias_initializer((self.units,), *args, **kwargs),
@@ -235,7 +193,8 @@ class TKANCell(Layer, DropoutRNNCell):
             elif isinstance(config, dict):
                 layer = KANLinear(self.sub_kan_output_dim, **config, use_layernorm=True)
             else:
-                layer = tf.keras.layers.Dense(self.sub_kan_output_dim, activation=config)
+                layer = Dense(self.sub_kan_output_dim, activation=config)
+            layer.build((input_shape[0], self.sub_kan_input_dim))
             self.tkan_sub_layers.append(layer)
     
         self.sub_tkan_kernel = self.add_weight(
@@ -271,31 +230,60 @@ class TKANCell(Layer, DropoutRNNCell):
         )
     
         self.built = True
-    
-    def call(self, inputs, states, training=False):
+
+    def _generate_dropout_mask(self, inputs):
+        if 0 < self.dropout < 1:
+            seed_generator = random.SeedGenerator(self.seed)
+            return random.dropout(
+                ops.ones_like(inputs),
+                self.dropout,
+                seed=seed_generator
+            )
+        return None
+
+    def _generate_recurrent_dropout_mask(self, states):
+        if 0 < self.recurrent_dropout < 1:
+            seed_generator = random.SeedGenerator(self.seed + 1)
+            return random.dropout(
+                ops.ones_like(states),
+                self.recurrent_dropout,
+                seed=seed_generator
+            )
+        return None
+
+    def call(self, inputs, states, training=None):
+        if self.backend == 'tensorflow':
+            return self._call_tensorflow(inputs, states, training)
+        else:
+            return self._call_generic(inputs, states, training)
+
+    def _call_tensorflow(self, inputs, states, training=False):
+        """
+        Needed to be different in order to be jit_compile friendly
+        """
+        import tensorflow as tf
         h_tm1 = states[0]  # Previous memory state for the LSTM part.
         c_tm1 = states[1]  # Previous carry state for the LSTM part.
         sub_states = states[2:]  # Previous states for each sub-layer.
-
+    
         batch_size = tf.shape(inputs)[0]
-        dp_mask = self.get_dropout_mask(inputs)
-        rec_dp_mask = self.get_recurrent_dropout_mask(h_tm1)
-
-        if training and self.dropout > 0.0:
-            inputs = inputs * dp_mask
-        if training and self.recurrent_dropout > 0.0:
-            h_tm1 = h_tm1 * rec_dp_mask
-
+        if training:
+            self.seed = (self.seed + 1) % (2**32 - 1) 
+            if self.dropout > 0.0:
+                inputs = inputs * self._generate_dropout_mask(inputs)
+            if self.recurrent_dropout > 0.0:
+                h_tm1 = h_tm1 * self._generate_recurrent_dropout_mask(h_tm1)
+    
         # Preallocate tensors for sub-layer outputs and new states
         sub_outputs = tf.TensorArray(dtype=tf.float32, size=len(self.tkan_sub_layers))
         new_sub_states = tf.TensorArray(dtype=tf.float32, size=len(self.tkan_sub_layers))
-
+    
         # Split the kernel and compute input projections for gates
         if self.use_bias:
           x_i, x_f, x_c = tf.split(self.recurrent_activation(tf.matmul(inputs, self.kernel) + tf.matmul(h_tm1, self.recurrent_kernel) + self.bias), 3, axis=1)
         else:
           x_i, x_f, x_c = tf.split(self.recurrent_activation(tf.matmul(inputs, self.kernel) + tf.matmul(h_tm1, self.recurrent_kernel)), 3, axis=1)
-
+    
         # Process each sub-layer
         for idx, (sub_layer, sub_state) in enumerate(zip(self.tkan_sub_layers, sub_states)):
             sub_kernel_x, sub_kernel_h = self.sub_tkan_recurrent_kernel_inputs[idx], self.sub_tkan_recurrent_kernel_states[idx]
@@ -303,29 +291,73 @@ class TKANCell(Layer, DropoutRNNCell):
             sub_output = sub_layer(agg_input)
             sub_recurrent_kernel_h, sub_recurrent_kernel_x = tf.split(self.sub_tkan_kernel[idx], 2, axis=0)
             new_sub_state = sub_recurrent_kernel_h * sub_output + sub_state * sub_recurrent_kernel_x
-
+    
             sub_outputs = sub_outputs.write(idx, sub_output)
             new_sub_states = new_sub_states.write(idx, new_sub_state)
-
+    
         # Stack outputs and states for further processing
         sub_outputs = sub_outputs.stack()
-
+    
         # Aggregate sub-layer outputs using weights and biases
         aggregated_sub_output = tf.reshape(sub_outputs, (batch_size, -1))
         aggregated_input = tf.matmul(aggregated_sub_output, self.aggregated_weight) + self.aggregated_bias
-
+    
         xo = self.recurrent_activation(aggregated_input)
-
+    
         c = x_f * c_tm1 + x_i * x_c 
-
+    
         # # Compute the TKAN cell's new states
         h = xo * self.activation(c)
-
+    
         # Prepare output and new states
         new_states = [h, c] + tf.unstack(new_sub_states.stack())
         return h, new_states
 
+    def _call_generic(self, inputs, states, training=None):
+        h_tm1 = states[0]  # Previous memory state
+        c_tm1 = states[1]  # Previous carry state
+        sub_states = states[2:]  # Previous states for sub-layers
 
+        if training:
+            self.seed = (self.seed + 1) % (2**32 - 1) 
+            dp_mask = self._generate_dropout_mask(inputs)
+            rec_dp_mask = self._generate_recurrent_dropout_mask(h_tm1)
+            if dp_mask is not None:
+                inputs *= dp_mask
+            if rec_dp_mask is not None:
+                h_tm1 *= rec_dp_mask
+
+        if self.use_bias:
+            gates = ops.matmul(inputs, self.kernel) + ops.matmul(h_tm1, self.recurrent_kernel) + self.bias
+        else:
+            gates = ops.matmul(inputs, self.kernel) + ops.matmul(h_tm1, self.recurrent_kernel)
+        
+        i, f, c = ops.split(self.recurrent_activation(gates), 3, axis=-1)
+
+        c = f * c_tm1 + i * self.activation(c)
+
+        sub_outputs = []
+        new_sub_states = []
+
+        for idx, (sub_layer, sub_state) in enumerate(zip(self.tkan_sub_layers, sub_states)):
+            sub_kernel_x, sub_kernel_h = self.sub_tkan_recurrent_kernel_inputs[idx], self.sub_tkan_recurrent_kernel_states[idx]
+            agg_input = inputs @ sub_kernel_x + sub_state @ sub_kernel_h
+            sub_output = sub_layer(agg_input)
+            sub_recurrent_kernel_h, sub_recurrent_kernel_x = ops.split(self.sub_tkan_kernel[idx], 2, axis=0)
+            new_sub_state = sub_recurrent_kernel_h * sub_output + sub_state * sub_recurrent_kernel_x
+
+            sub_outputs.append(sub_output)
+            new_sub_states.append(new_sub_state)
+
+        aggregated_sub_output = ops.concatenate(sub_outputs, axis=-1)
+        aggregated_input = ops.dot(aggregated_sub_output, self.aggregated_weight) + self.aggregated_bias
+
+        o = self.recurrent_activation(aggregated_input)
+
+        h = o * self.activation(c)
+
+        return h, [h, c] + new_sub_states
+        
     def get_config(self):
         config = super().get_config()
         config.update({
@@ -348,125 +380,19 @@ class TKANCell(Layer, DropoutRNNCell):
             "bias_constraint": constraints.serialize(self.bias_constraint),
             "dropout": self.dropout,
             "recurrent_dropout": self.recurrent_dropout,
-            "seed": self.seed,
         })
         return config
 
-    @classmethod
-    def from_config(cls, config):
-        return cls(**config)
-        
     def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
         dtype = dtype or self.compute_dtype
         return [
-            tf.zeros((batch_size, self.units), dtype=dtype),
-            tf.zeros((batch_size, self.units), dtype=dtype)
-        ] + [tf.zeros((batch_size, self.sub_kan_output_dim), dtype=dtype) for _ in range(len(self.tkan_sub_layers))]
+            ops.zeros((batch_size, self.units), dtype=dtype),
+            ops.zeros((batch_size, self.units), dtype=dtype)
+        ] + [ops.zeros((batch_size, self.sub_kan_output_dim), dtype=dtype) for _ in range(len(self.tkan_sub_layers))]
 
 
-
-
-@tf.keras.utils.register_keras_serializable(package="tkan", name="TKAN")
+@keras.utils.register_keras_serializable(package="tkan", name="TKAN")
 class TKAN(RNN):
-    """Temporal Kolmogorow-Arnold Network - Inzirillo & Genet 2024.
-
-    For example:
-
-    >>> inputs = np.random.random((32, 10, 8))
-    >>> tkan = TKAN(4)
-    >>> output = tkan(inputs)
-    >>> output.shape
-    (32, 4)
-    >>> tkan = TKAN(
-    ...     4, return_sequences=True, return_state=True)
-    >>> whole_seq_output, states = tkan(inputs)
-    >>> final_memory_state, final_carry_state, sub_tkan_layers_states = states[0], states[1], states[2:]
-    >>> whole_seq_output.shape
-    (32, 10, 4)
-    >>> final_memory_state.shape
-    (32, 4)
-    >>> final_carry_state.shape
-    (32, 4)
-    >>> final_carry_state.shape
-    (32, 4)
-
-    Args:
-        units: Positive integer, dimensionality of the output space.
-        activation: Activation function to use.
-            Default: hyperbolic tangent (`tanh`).
-            If you pass `None`, no activation is applied
-            (ie. "linear" activation: `a(x) = x`).
-        recurrent_activation: Activation function to use
-            for the recurrent step.
-            Default: sigmoid (`sigmoid`).
-            If you pass `None`, no activation is applied
-            (ie. "linear" activation: `a(x) = x`).
-        use_bias: Boolean, (default `True`), whether the layer
-            should use a bias vector.
-        kernel_initializer: Initializer for the `kernel` weights matrix,
-            used for the linear transformation of the inputs. Default:
-            `"glorot_uniform"`.
-        recurrent_initializer: Initializer for the `recurrent_kernel`
-            weights matrix, used for the linear transformation of the recurrent
-            state. Default: `"orthogonal"`.
-        bias_initializer: Initializer for the bias vector. Default: `"zeros"`.
-        unit_forget_bias: Boolean (default `True`). If `True`,
-            add 1 to the bias of the forget gate at initialization.
-            Setting it to `True` will also force `bias_initializer="zeros"`.
-            This is recommended in [Jozefowicz et al.](
-            https://github.com/mlresearch/v37/blob/gh-pages/jozefowicz15.pdf)
-        kernel_regularizer: Regularizer function applied to the `kernel` weights
-            matrix. Default: `None`.
-        recurrent_regularizer: Regularizer function applied to the
-            `recurrent_kernel` weights matrix. Default: `None`.
-        bias_regularizer: Regularizer function applied to the bias vector.
-            Default: `None`.
-        activity_regularizer: Regularizer function applied to the output of the
-            layer (its "activation"). Default: `None`.
-        kernel_constraint: Constraint function applied to the `kernel` weights
-            matrix. Default: `None`.
-        recurrent_constraint: Constraint function applied to the
-            `recurrent_kernel` weights matrix. Default: `None`.
-        bias_constraint: Constraint function applied to the bias vector.
-            Default: `None`.
-        dropout: Float between 0 and 1. Fraction of the units to drop for the
-            linear transformation of the inputs. Default: 0.
-        recurrent_dropout: Float between 0 and 1. Fraction of the units to drop
-            for the linear transformation of the recurrent state. Default: 0.
-        seed: Random seed for dropout.
-        return_sequences: Boolean. Whether to return the last output
-            in the output sequence, or the full sequence. Default: `False`.
-        return_state: Boolean. Whether to return the last state in addition
-            to the output. Default: `False`.
-        go_backwards: Boolean (default: `False`).
-            If `True`, process the input sequence backwards and return the
-            reversed sequence.
-        stateful: Boolean (default: `False`). If `True`, the last state
-            for each sample at index i in a batch will be used as initial
-            state for the sample of index i in the following batch.
-        unroll: Boolean (default False).
-            If `True`, the network will be unrolled,
-            else a symbolic loop will be used.
-            Unrolling can speed-up a RNN,
-            although it tends to be more memory-intensive.
-            Unrolling is only suitable for short sequences.
-        use_cudnn: Ignored, no implementation associated for the moment
-
-    Call arguments:
-        inputs: A 3D tensor, with shape `(batch, timesteps, feature)`.
-        mask: Binary tensor of shape `(samples, timesteps)` indicating whether
-            a given timestep should be masked  (optional).
-            An individual `True` entry indicates that the corresponding timestep
-            should be utilized, while a `False` entry indicates that the
-            corresponding timestep should be ignored. Defaults to `None`.
-        training: Python boolean indicating whether the layer should behave in
-            training mode or in inference mode. This argument is passed to the
-            cell when calling it. This is only relevant if `dropout` or
-            `recurrent_dropout` is used  (optional). Defaults to `None`.
-        initial_state: List of initial state tensors to be passed to the first
-            call of the cell (optional, `None` causes creation
-            of zero-filled initial state tensors). Defaults to `None`.
-    """
     def __init__(
         self,
         units,
@@ -494,6 +420,7 @@ class TKAN(RNN):
         go_backwards=False,
         stateful=False,
         unroll=False,
+        seed=None,
         **kwargs,
     ):
         cell = TKANCell(
@@ -516,7 +443,7 @@ class TKAN(RNN):
             bias_constraint=bias_constraint,
             dropout=dropout,
             recurrent_dropout=recurrent_dropout,
-            dtype=kwargs.get("dtype"),
+            seed=seed,
         )
         super().__init__(
             cell,
@@ -530,7 +457,7 @@ class TKAN(RNN):
         self.activity_regularizer = regularizers.get(activity_regularizer)
         self.input_spec = [InputSpec(ndim=3)]
 
-
+        
     def inner_loop(self, sequences, initial_state, mask, training=False):
         if isinstance(mask, (list, tuple)):
             mask = mask[0]
@@ -550,7 +477,7 @@ class TKAN(RNN):
     @property
     def sub_kan_configs(self):
         return self.cell.sub_kan_configs
-    
+
     @property
     def sub_kan_output_dim(self):
         return self.cell.sub_kan_output_dim
@@ -619,10 +546,14 @@ class TKAN(RNN):
     def recurrent_dropout(self):
         return self.cell.recurrent_dropout
 
+
+    def build(self, input_shape):
+        super().build(input_shape)
+    
     def get_config(self):
         config = {
             "units": self.units,
-            "sub_kan_configs": self.cell.sub_kan_configs,
+            "sub_kan_configs": self.sub_kan_configs,
             "sub_kan_output_dim": self.cell.sub_kan_output_dim,
             "sub_kan_input_dim": self.cell.sub_kan_input_dim,
             "activation": activations.serialize(self.cell.activation),
@@ -645,7 +576,10 @@ class TKAN(RNN):
         base_config = super().get_config()
         del base_config["cell"]
         return {**base_config, **config}
-
+        
     @classmethod
     def from_config(cls, config):
         return cls(**config)
+
+    def compute_output_shape(self, input_shape):
+        return super().compute_output_shape(input_shape)
