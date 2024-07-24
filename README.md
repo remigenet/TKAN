@@ -6,6 +6,8 @@ The implementation is tested to be compatatible with Tensorflow, Jax and Torch. 
 It is the original implementation of the [paper](https://arxiv.org/abs/2405.07344)
 The KAN part implementation has been inspired from [efficient_kan](https://github.com/Blealtan/efficient-kan), and is available [here](https://github.com/remigenet/keras_efficient_kan) and works similarly to it, thus not exactly like the [original implementation](https://github.com/KindXiaoming/pykan).
 
+In case of performance consideration, the best setup tested used [jax docker image](https://hub.docker.com/r/bitnami/jax/) followed by installing jax using ```pip install "jax[cuda12]"```, this is what is used in the example section where you can compare the TKAN vs LSTM vs GRU time and performance.
+I also discourage using as is the example for torch, it seems that currently when running test using torch backend with keras is much slower than torch directly, even for GRU or LSTM. 
 
 ![TKAN representation](image/TKAN.drawio.png)
 
