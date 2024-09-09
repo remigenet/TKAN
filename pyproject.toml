@@ -11,13 +11,13 @@ readme = "README.md"
 packages = [{include = "tkan"}]  
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.12"
+python = ">=3.9,<3.13"
 keras = ">=3.0.0,<4.0"
-keras_efficient_kan = "^0.1.5"
+keras_efficient_kan = "^0.1.6"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
-pytest-xdist = "^3.3.0"
+pytest-xdist = "^3.6.1"
 tensorflow = "^2.15.0"
 torch = "^2.0.0"
 jax = "^0.4.13"
@@ -29,5 +29,7 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore:Can't initialize NVML:UserWarning",
     "ignore:jax.xla_computation is deprecated:DeprecationWarning",
-    "ignore::DeprecationWarning:jax._src.dtypes"
+    "ignore::DeprecationWarning:jax._src.dtypes",
+    "ignore:Type google._upb._message.MessageMapContainer uses PyType_Spec with a metaclass that has custom tp_new:DeprecationWarning:importlib",
+    "ignore:Type google._upb._message.ScalarMapContainer uses PyType_Spec with a metaclass that has custom tp_new:DeprecationWarning:importlib",
 ]
