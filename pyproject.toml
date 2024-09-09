@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "tkan" 
-version = "0.4.1" 
+version = "0.4.2" 
 description = "Temporal KAN model"
 authors = [ "Rémi Genet", "Hugo Inzirillo"]  
 readme = "README.md"  
@@ -13,7 +13,7 @@ packages = [{include = "tkan"}]
 [tool.poetry.dependencies]
 python = ">=3.9,<3.12"
 keras = ">=3.0.0,<4.0"
-keras_efficient_kan = "^0.1.4"
+keras_efficient_kan = "^0.1.5"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
