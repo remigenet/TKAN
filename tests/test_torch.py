@@ -1,4 +1,5 @@
 import os
+import tempfile
 BACKEND = 'torch'
 os.environ['KERAS_BACKEND'] = BACKEND
 
@@ -7,6 +8,8 @@ import keras
 from keras import ops
 from keras import backend
 from keras import random
+from keras.models import Model, load_model
+from keras.layers import Input
 from tkan import TKAN
 
 def generate_random_tensor(shape):
@@ -112,3 +115,44 @@ def test_tkan_dropout():
     output4 = layer(inputs, training=False)
     
     assert ops.all(ops.equal(output3, output4)), "Outputs should be the same in inference mode"
+
+def test_tkan_save_and_load():
+    assert keras.backend.backend() == BACKEND
+    batch_size, time_steps, features = 32, 10, 8
+    units = 16
+
+    # Create and compile the model
+    inputs = Input(shape=(time_steps, features))
+    tkan_layer = TKAN(units, return_sequences=True)
+    outputs = tkan_layer(inputs)
+    model = Model(inputs, outputs)
+    model.compile(optimizer='adam', loss='mse')
+
+    # Generate some random data
+    x_train = generate_random_tensor((batch_size, time_steps, features))
+    y_train = generate_random_tensor((batch_size, time_steps, units))
+
+    # Train the model
+    model.fit(x_train, y_train, epochs=1, batch_size=16, verbose=False)
+
+    # Get predictions before saving
+    predictions_before = model.predict(x_train, verbose=False)
+
+    # Save the model
+    with tempfile.TemporaryDirectory() as tmpdir:
+        model_path = os.path.join(tmpdir, 'tkan_model.keras')
+        model.save(model_path)
+
+        # Load the model
+        loaded_model = load_model(model_path)
+
+    # Get predictions after loading
+    predictions_after = loaded_model.predict(x_train, verbose=False)
+
+    # Compare predictions
+    assert ops.all(ops.equal(predictions_before, predictions_after)), "Predictions should be the same after loading"
+
+    # Test that the loaded model can be used for further training
+    loaded_model.fit(x_train, y_train, epochs=1, batch_size=16, verbose=False)
+
+    print("TKAN model successfully saved, loaded, and reused.")
