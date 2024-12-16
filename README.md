@@ -10,7 +10,7 @@ In case of performance consideration, the best setup tested used [jax docker ima
 I also discourage using as is the example for torch, it seems that currently when running test using torch backend with keras is much slower than torch directly, even for GRU or LSTM. 
 
 ![TKAN representation](image/TKAN.drawio.png)
-
+![TKAN IMAGE](https://github.com/kkkkcccc88/TKAN/blob/main/image/TKAN.drawio.png)
 ## Installation
 
 Install TKAN directly from PyPI:
