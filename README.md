@@ -10,7 +10,6 @@ In case of performance consideration, the best setup tested used [jax docker ima
 I also discourage using as is the example for torch, it seems that currently when running test using torch backend with keras is much slower than torch directly, even for GRU or LSTM. 
 
 ![TKAN representation](image/TKAN.drawio.png)
-
 ## Installation
 
 Install TKAN directly from PyPI:
@@ -44,6 +43,11 @@ model = keras.Sequential([
 ```
 
 You can find a more complete example with comparison with other models in the example folder.
+
+## Other visualizations
+
+I thank [kkkkcccc88](https://github.com/kkkkcccc88) for this participation to the project by creating this visualization of the TKAN architecture.
+![TKAN IMAGE](image/TKAN_IMAGE.png)
 
 Please cite our work if you use this repo:
 
