@@ -46,7 +46,7 @@ You can find a more complete example with comparison with other models in the ex
 
 ## Other visualizations
 
-I thank [kkkkcccc88](https://github.com/kkkkcccc88) for this participation to the project by creating this visualization of the TKAN architecture.
+Thanks to [kkkkcccc88](https://github.com/kkkkcccc88) for this participation to the project by creating this visualization of the TKAN architecture.
 ![TKAN IMAGE](image/TKAN_IMAGE.png)
 
 Please cite our work if you use this repo:
